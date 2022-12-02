@@ -25,6 +25,7 @@ import android.graphics.Matrix
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -39,10 +40,16 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Observer
 import androidx.recyclerview.widget.RecyclerView
+import org.tensorflow.lite.DataType
+import org.tensorflow.lite.examples.classification.ml.ModelUnquant
 import org.tensorflow.lite.examples.classification.ui.RecognitionAdapter
 import org.tensorflow.lite.examples.classification.util.YuvToRgbConverter
 import org.tensorflow.lite.examples.classification.viewmodel.Recognition
 import org.tensorflow.lite.examples.classification.viewmodel.RecognitionListViewModel
+import org.tensorflow.lite.support.image.TensorImage
+import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import kotlin.random.Random
 
@@ -64,6 +71,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var preview: Preview // Preview use case, fast, responsive view of the camera
     private lateinit var imageAnalyzer: ImageAnalysis // Analysis use case, for running ML code
     private lateinit var camera: Camera
+    private lateinit var debugImage: ImageView
     private val cameraExecutor = Executors.newSingleThreadExecutor()
 
     // Views attachment
@@ -80,6 +88,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        debugImage = findViewById(R.id.debugImage)
 
         // Request camera permissions
         if (allPermissionsGranted()) {
@@ -173,10 +183,14 @@ class MainActivity : AppCompatActivity() {
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also { analysisUseCase: ImageAnalysis ->
-                    analysisUseCase.setAnalyzer(cameraExecutor, ImageAnalyzer(this) { items ->
+                    analysisUseCase.setAnalyzer(cameraExecutor, ImageAnalyzer(this, { items ->
                         // updating the list of recognised objects
                         recogViewModel.updateData(items)
-                    })
+                    }, { bitmap ->
+                        runOnUiThread {
+                            debugImage.setImageBitmap((bitmap))
+                        }
+                    }))
                 }
 
             // Select camera, back is the default. If it is not available, choose front camera
@@ -203,12 +217,14 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private class ImageAnalyzer(ctx: Context, private val listener: RecognitionListener) :
+    private class ImageAnalyzer(ctx: Context, private val listener: RecognitionListener, private val callback: (Bitmap?) -> Unit) :
         ImageAnalysis.Analyzer {
 
         // TODO 1: Add class variable TensorFlow Lite Model
         // Initializing the flowerModel by lazy so that it runs in the same thread when the process
         // method is called.
+        private val model = ModelUnquant.newInstance(ctx)
+        private var debugImage: Bitmap? = null
 
         // TODO 6. Optional GPU acceleration
 
@@ -218,15 +234,31 @@ class MainActivity : AppCompatActivity() {
             val items = mutableListOf<Recognition>()
 
             // TODO 2: Convert Image to Bitmap then to TensorImage
+            val bitmap = toBitmap(imageProxy)
+            val resized = bitmap?.let { Bitmap.createScaledBitmap(it, 224, 224, true) }
+            debugImage = resized
+            callback(debugImage)
+
+            val tfImage = TensorImage(DataType.FLOAT32)
+            tfImage.load(resized)
+
+            val inputFeature0 = TensorBuffer.createFixedSize(intArrayOf(1, 224, 224, 3), DataType.FLOAT32)
+            inputFeature0.loadBuffer(tfImage.buffer)
 
             // TODO 3: Process the image using the trained model, sort and pick out the top results
+            val outputs = model.process(inputFeature0)
 
             // TODO 4: Converting the top probability items into a list of recognitions
+            val outputFeature0 = outputs.outputFeature0AsTensorBuffer
+            items.add(Recognition("Pen", outputFeature0.getFloatValue(0)))
+            items.add(Recognition("Battery", outputFeature0.getFloatValue(1)))
+            items.add(Recognition("Shell", outputFeature0.getFloatValue(2)))
+            items.add(Recognition("Others", outputFeature0.getFloatValue(3)))
 
             // START - Placeholder code at the start of the codelab. Comment this block of code out.
-            for (i in 0 until MAX_RESULT_DISPLAY){
-                items.add(Recognition("Fake label $i", Random.nextFloat()))
-            }
+//            for (i in 0 until MAX_RESULT_DISPLAY){
+//                items.add(Recognition("Fake label $i", Random.nextFloat()))
+//            }
             // END - Placeholder code at the start of the codelab. Comment this block of code out.
 
             // Return the result
@@ -255,7 +287,7 @@ class MainActivity : AppCompatActivity() {
                 rotationMatrix = Matrix()
                 rotationMatrix.postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
                 bitmapBuffer = Bitmap.createBitmap(
-                    imageProxy.width, imageProxy.height, Bitmap.Config.ARGB_8888
+                    image.width, image.height, Bitmap.Config.ARGB_8888
                 )
             }
 

@@ -42,6 +42,14 @@
                     android:contentDescription="@string/tensorflow_lite_logo_description" />
         </androidx.appcompat.widget.Toolbar>
 
+        <ImageView
+            android:id="@+id/debugImage"
+            android:layout_width="100dp"
+            android:layout_height="100dp"
+            android:layout_gravity="end"
+            android:contentDescription="@string/app_name"
+            android:src="@drawable/ic_launcher_foreground" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recognitionResults"
             android:layout_width="match_parent"
