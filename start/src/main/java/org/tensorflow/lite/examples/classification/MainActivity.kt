@@ -42,6 +42,7 @@ import androidx.lifecycle.Observer
 import androidx.recyclerview.widget.RecyclerView
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.examples.classification.ml.ModelUnquant
+import org.tensorflow.lite.examples.classification.ml.ModelUnquant2
 import org.tensorflow.lite.examples.classification.ui.RecognitionAdapter
 import org.tensorflow.lite.examples.classification.util.YuvToRgbConverter
 import org.tensorflow.lite.examples.classification.viewmodel.Recognition
@@ -223,7 +224,7 @@ class MainActivity : AppCompatActivity() {
         // TODO 1: Add class variable TensorFlow Lite Model
         // Initializing the flowerModel by lazy so that it runs in the same thread when the process
         // method is called.
-        private val model = ModelUnquant.newInstance(ctx)
+        private val model = ModelUnquant2.newInstance(ctx)
         private var debugImage: Bitmap? = null
 
         // TODO 6. Optional GPU acceleration
@@ -234,26 +235,18 @@ class MainActivity : AppCompatActivity() {
             val items = mutableListOf<Recognition>()
 
             // TODO 2: Convert Image to Bitmap then to TensorImage
-            val bitmap = toBitmap(imageProxy)
-            val resized = bitmap?.let { Bitmap.createScaledBitmap(it, 224, 224, true) }
-            debugImage = resized
-            callback(debugImage)
-
-            val tfImage = TensorImage(DataType.FLOAT32)
-            tfImage.load(resized)
-
-            val inputFeature0 = TensorBuffer.createFixedSize(intArrayOf(1, 224, 224, 3), DataType.FLOAT32)
-            inputFeature0.loadBuffer(tfImage.buffer)
+            val tfImage = TensorImage.fromBitmap(toBitmap(imageProxy))
 
             // TODO 3: Process the image using the trained model, sort and pick out the top results
-            val outputs = model.process(inputFeature0)
+            val outputs = model.process(tfImage)
+                .probabilityAsCategoryList.apply {
+                    sortByDescending { it.score } // Sort with highest confidence first
+                }.take(MAX_RESULT_DISPLAY) // take the top results
 
             // TODO 4: Converting the top probability items into a list of recognitions
-            val outputFeature0 = outputs.outputFeature0AsTensorBuffer
-            items.add(Recognition("Pen", outputFeature0.getFloatValue(0)))
-            items.add(Recognition("Battery", outputFeature0.getFloatValue(1)))
-            items.add(Recognition("Shell", outputFeature0.getFloatValue(2)))
-            items.add(Recognition("Others", outputFeature0.getFloatValue(3)))
+            for (output in outputs) {
+                items.add(Recognition(output.label, output.score))
+            }
 
             // START - Placeholder code at the start of the codelab. Comment this block of code out.
 //            for (i in 0 until MAX_RESULT_DISPLAY){
